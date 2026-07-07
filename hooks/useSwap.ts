@@ -8,13 +8,14 @@ import {
   BASE_FEE,
   Networks,
 } from '@stellar/stellar-sdk';
-import { horizon, parseAsset } from '@/lib/stellar';
+import { horizon, parseAsset, hasTrustline, buildTrustlineTx, isNative } from '@/lib/stellar';
 import { recordSwap } from '@/lib/contract';
-import { useWallet } from './useWallet';
+import { useWallet } from '@/lib/WalletProvider';
 
 export type SwapStatus =
   | 'idle'
   | 'quoting'
+  | 'adding_trustline'
   | 'awaiting_signature'
   | 'submitting_swap'
   | 'recording_on_chain'
@@ -24,6 +25,11 @@ export type SwapStatus =
 export interface SwapResult {
   dexTxHash: string | null;
   contractTxHash: string | null;
+}
+
+function msgIncludes(err: any, ...keywords: string[]) {
+  const msg = err.message || String(err);
+  return keywords.some((k) => msg.includes(k));
 }
 
 export function useSwap() {
@@ -53,9 +59,22 @@ export function useSwap() {
         const sellAsset = parseAsset(sellAssetStr);
         const buyAsset = parseAsset(buyAssetStr);
 
-        setStatus('awaiting_signature');
-
         const account = await horizon.loadAccount(publicKey);
+
+        if (!isNative(buyAssetStr)) {
+          const hasTL = await hasTrustline(publicKey, buyAssetStr);
+          if (!hasTL) {
+            setStatus('adding_trustline');
+            const tlXdr = buildTrustlineTx(account, buyAssetStr, Networks.TESTNET);
+            const signedTlXdr = await signTransaction(tlXdr);
+            const signedTlTx = TransactionBuilder.fromXDR(signedTlXdr, Networks.TESTNET);
+            await horizon.submitTransaction(signedTlTx);
+          }
+        }
+
+        const swapAccount = await horizon.loadAccount(publicKey);
+
+        setStatus('awaiting_signature');
 
         const tx = new TransactionBuilder(account, {
           fee: BASE_FEE,
@@ -88,19 +107,31 @@ export function useSwap() {
         setStatus('recording_on_chain');
 
         try {
-          const sellAmountBig = BigInt(sellAmount);
-          const buyAmountBig = BigInt(minBuyAmount);
+          const toStroops = (val: string): bigint => {
+            const parts = val.split('.');
+            const whole = parts[0];
+            const frac = (parts[1] || '').padEnd(7, '0').slice(0, 7);
+            return BigInt(whole + frac);
+          };
+          const assetCode = (a: string) => a.split(':')[0];
+          const sellAmountBig = toStroops(sellAmount);
+          const buyAmountBig = toStroops(minBuyAmount);
 
           const contractTx = await recordSwap(
             publicKey,
             publicKey,
-            sellAssetStr,
-            buyAssetStr,
+            assetCode(sellAssetStr),
+            assetCode(buyAssetStr),
             sellAmountBig,
             buyAmountBig
           );
 
-          const sentTx = await contractTx.signAndSend();
+          const sentTx = await contractTx.signAndSend({
+            signTransaction: async (xdr: string) => {
+              const signed = await signTransaction(xdr);
+              return { signedTxXdr: signed };
+            },
+          });
 
           setStatus('success');
           setResult({
@@ -119,29 +150,38 @@ export function useSwap() {
         }
       } catch (err: any) {
         setStatus('failed');
-        const msg = err.message || String(err);
-        if (
-          msg.includes('path') ||
-          msg.includes('Path') ||
-          msg.includes('liquidity')
-        ) {
-          setError(
-            'No liquidity found for this pair on the testnet orderbook.'
-          );
+
+        const codes = err?.response?.data?.extras?.result_codes;
+        if (codes?.operations) {
+          const opCode = codes.operations[0];
+          if (opCode === 'op_no_trust') {
+            setError(
+              'Trustline creation failed. Please try the swap again.'
+            );
+          } else if (opCode === 'op_underfunded' || opCode === 'op_line_full') {
+            setError('Insufficient balance or trustline limit reached.');
+          } else if (opCode === 'op_sell_not_authorized') {
+            setError('Asset issuer has not authorized your account.');
+          } else if (opCode === 'op_path_payment_strict_send_no_issuer') {
+            setError('Destination asset issuer does not exist.');
+          } else if (
+            msgIncludes(err, 'path') ||
+            msgIncludes(err, 'liquidity')
+          ) {
+            setError('No liquidity found for this pair on the testnet orderbook.');
+          } else {
+            setError(`Transaction failed: ${opCode}`);
+          }
         } else if (
-          msg.includes('balance') ||
-          msg.includes('insufficient') ||
-          msg.includes('op_underfunded')
-        ) {
-          setError('Insufficient balance for the sell amount + network fee.');
-        } else if (
-          msg.includes('rejected') ||
-          msg.includes('cancel') ||
-          msg.includes('User')
+          msgIncludes(err, 'rejected') ||
+          msgIncludes(err, 'cancel') ||
+          msgIncludes(err, 'User')
         ) {
           setError('User rejected the wallet signature request.');
+        } else if (codes?.transaction === 'tx_bad_seq') {
+          setError('Transaction sequence error. Please refresh and try again.');
         } else {
-          setError(msg);
+          setError(err.message || 'Request failed with status code 400');
         }
       }
     },

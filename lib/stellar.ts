@@ -46,6 +46,36 @@ export function parseAsset(assetStr: string): Asset {
   return new Asset(code, issuer);
 }
 
+export function isNative(assetStr: string): boolean {
+  return assetStr === NATIVE_ASSET;
+}
+
+export async function hasTrustline(publicKey: string, assetStr: string): Promise<boolean> {
+  if (isNative(assetStr)) return true;
+  const [code, issuer] = assetStr.split(':');
+  const account = await horizon.loadAccount(publicKey);
+  return account.balances.some(
+    (b: any) => b.asset_code === code && b.asset_issuer === issuer
+  );
+}
+
+export function buildTrustlineTx(
+  account: any,
+  assetStr: string,
+  networkPassphrase: string
+): string {
+  const [code, issuer] = assetStr.split(':');
+  const asset = new Asset(code, issuer);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(Operation.changeTrust({ asset }))
+    .setTimeout(30)
+    .build();
+  return tx.toXDR();
+}
+
 export function shortenAddress(addr: string): string {
   if (addr.length <= 8) return addr;
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;

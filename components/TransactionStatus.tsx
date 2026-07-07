@@ -5,6 +5,7 @@ import type { SwapStatus, SwapResult } from '@/hooks/useSwap';
 const STATUS_LABELS: Record<SwapStatus, string> = {
   idle: '',
   quoting: 'Finding best swap path…',
+  adding_trustline: 'Adding trustline for asset…',
   awaiting_signature: 'Waiting for wallet signature…',
   submitting_swap: 'Submitting DEX swap transaction…',
   recording_on_chain: 'Recording swap on-chain…',
@@ -15,6 +16,7 @@ const STATUS_LABELS: Record<SwapStatus, string> = {
 const STATUS_COLORS: Record<SwapStatus, string> = {
   idle: '',
   quoting: 'text-blue-600',
+  adding_trustline: 'text-amber-600',
   awaiting_signature: 'text-amber-600',
   submitting_swap: 'text-blue-600',
   recording_on_chain: 'text-purple-600',
@@ -35,6 +37,7 @@ export default function TransactionStatus({ status, error, result }: Props) {
     <div className="rounded-lg border border-gray-200 bg-white p-4">
       {status !== 'idle' && (
         <p className={`text-sm font-medium ${STATUS_COLORS[status]}`}>
+          {status === 'adding_trustline' && '🔗 '}
           {status === 'awaiting_signature' && '✍️ '}
           {status === 'submitting_swap' && '🔄 '}
           {status === 'recording_on_chain' && '📝 '}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { buildLeaderboard, getTotalFees, getTotalSwaps } from '@/lib/contract';
-import { useWallet } from './useWallet';
+import { useWallet } from '@/lib/WalletProvider';
 
 const POLL_INTERVAL = 5000;
 

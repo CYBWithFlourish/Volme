@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@/hooks/useWallet';
+import { useWallet } from '@/lib/WalletProvider';
 import { useSwap } from '@/hooks/useSwap';
 import TransactionStatus from './TransactionStatus';
-import { getAccountBalances } from '@/lib/stellar';
+import { getAccountBalances, findStrictSendPath, parseAsset } from '@/lib/stellar';
 
 const SELL_ASSETS = ['XLM', 'USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'];
 const BUY_ASSETS = ['XLM', 'USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'];
@@ -22,9 +22,49 @@ export default function SwapCard() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!publicKey) return;
-    getAccountBalances(publicKey).then(setBalances).catch(() => {});
+    if (publicKey) {
+      getAccountBalances(publicKey).then(setBalances).catch(() => {});
+    }
   }, [publicKey]);
+
+  useEffect(() => {
+    if (!sellAmount || isNaN(Number(sellAmount)) || Number(sellAmount) <= 0) {
+      setMinBuyAmount('');
+      setQuoteError(null);
+      return;
+    }
+    setFetchingQuote(true);
+    setQuoteError(null);
+    const fetchQuote = async () => {
+      try {
+        const paths = await findStrictSendPath(
+          parseAsset(sellAsset),
+          sellAmount,
+          parseAsset(buyAsset)
+        );
+        if (paths.records.length === 0) {
+          setQuoteError('No liquidity found for this pair on the DEX.');
+          setMinBuyAmount('');
+          return;
+        }
+        setMinBuyAmount(paths.records[0].destination_amount);
+      } catch {
+        setQuoteError('Failed to fetch quote.');
+        setMinBuyAmount('');
+      } finally {
+        setFetchingQuote(false);
+      }
+    };
+    const timer = setTimeout(fetchQuote, 400);
+    return () => clearTimeout(timer);
+  }, [sellAmount, sellAsset, buyAsset]);
+
+  const formatRate = (sell: string, buy: string) => {
+    const s = Number(sell);
+    const b = Number(buy);
+    if (s === 0) return '—';
+    return (b / s).toFixed(7);
+  };
 
   const handleSwapAssets = useCallback(() => {
     setSellAsset(buyAsset);
@@ -131,6 +171,14 @@ export default function SwapCard() {
               className="flex-1 rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm"
             />
           </div>
+          {minBuyAmount && !quoteError && (
+            <p className="mt-1 text-xs text-gray-400">
+              1 {assetLabel(sellAsset)} ≈ {formatRate(sellAmount, minBuyAmount)} {assetLabel(buyAsset)}
+            </p>
+          )}
+          {fetchingQuote && (
+            <p className="mt-1 text-xs text-gray-400">Fetching quote…</p>
+          )}
         </div>
 
         {quoteError && (
@@ -143,19 +191,22 @@ export default function SwapCard() {
             !sellAmount ||
             !minBuyAmount ||
             status === 'quoting' ||
+            status === 'adding_trustline' ||
             status === 'submitting_swap' ||
             status === 'recording_on_chain' ||
             status === 'awaiting_signature'
           }
           className="w-full rounded-lg bg-gray-900 py-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
         >
-          {status === 'quoting' || status === 'awaiting_signature'
-            ? 'Processing…'
-            : status === 'submitting_swap'
-              ? 'Submitting…'
-              : status === 'recording_on_chain'
-                ? 'Recording…'
-                : 'Swap'}
+          {status === 'adding_trustline'
+            ? 'Adding Trustline…'
+            : status === 'quoting' || status === 'awaiting_signature'
+              ? 'Processing…'
+              : status === 'submitting_swap'
+                ? 'Submitting…'
+                : status === 'recording_on_chain'
+                  ? 'Recording…'
+                  : 'Swap'}
         </button>
       </div>
 

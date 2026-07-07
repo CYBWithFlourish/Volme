@@ -1,6 +1,6 @@
 'use client';
 
-import { useWallet } from '@/hooks/useWallet';
+import { useWallet } from '@/lib/WalletProvider';
 import { shortenAddress } from '@/lib/stellar';
 
 export default function Header() {

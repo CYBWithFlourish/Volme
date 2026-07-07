@@ -105,8 +105,11 @@ Open [http://localhost:3000](http://localhost:3000).
 | `get_all_traders`     | List of all unique traders                 |
 
 ## Live Demo
-
+https://volme.vercel.app/
 
 ## Screenshot
 
-> Wallet options modal showing Freighter, xBull, Albedo, Rabet, Hana, WalletConnect.
+![screenshot](./assets/screenshots/volme-multi-wallet-connect.png)
+![screenshot](./assets/screenshots/volme-swap.png)
+![screenshot](./assets/screenshots/volme-successful-tx-recorded.png)
+
